@@ -35,6 +35,31 @@
 
 - 1つの型（または主要な `extension` ブロック）に含まれるメソッドは4〜5個を目安にしてください。3個未満では少なすぎ、6個以上は多すぎます（責務過多の兆候です）。必須です。
     - **注意: メソッド数は同一型のすべての `extension` を合算してカウントしてください。** `extension` に分割しても総数は変わりません。責務が多い場合は型自体の分割を検討してください。
+
+### カウント対象の定義
+
+- **カウント対象**: `func` で定義されるメソッド、複数行の `var` computed property
+- **カウント対象外**:
+    - `init`, `required init?(coder:)`, `deinit`（初期化子/終了子）
+    - 1行の computed property（`var x: T { y }` 形式のゲッター）
+
+### Apple定義プロトコル準拠メソッドの除外
+
+Apple定義プロトコル（`UICollectionViewDataSource`, `UICollectionViewDelegateFlowLayout`, `UIScrollViewDelegate`, `MKMapViewDelegate`, `UIContextMenuInteractionDelegate` 等）の準拠メソッドは、メソッド数カウントから**除外**する。カウント対象は型が独自に定義したメソッドのみとする。
+
+理由:
+- シグネチャがApple固定であり変更不可能
+- 省略するとコンパイルエラーとなり削除不可能
+- `self` が必要であり別型に移動すると委譲コストが増す
+
+ただし、プロトコル準拠メソッドが多すぎる場合（8個以上）は、DataSource/Delegate を別オブジェクトに分離することを検討する。
+
+### 単一責務型の最小メソッド数
+
+単一プロトコル準拠や単一責務の型は、メソッド数が3未満でも許容する。他の型と統合して責務が混在するよりは、少数メソッドの型を維持すること。
+
+例: `UIContextMenuInteractionDelegate` のみを責務とする型が1メソッドであることは適切。無理に他の型と統合して「ジェスチャ＋コンテキストメニュー」のような混在責務にしない。
+
 - メソッドは必ず25行以下に短くしてください。必須です。
     - `guard let` や `defer` を活用してネストを浅くし、行数を抑えてください。
     - 26行以上になる場合は `private` なヘルパーメソッドに分割してください。
@@ -88,6 +113,27 @@
 
 - Path操作には `String` 操作や `NSString` を使わず、すべて標準の **`URL` 構造体** および **`FileManager`** を使用してください。
 - 非同期処理が含まれる場合は、Completion Handlerではなく、可能な限り Swift Concurrency (`async/await`) を使用して可読性を高めてください。
+
+### SwiftUI View の型分割
+
+- SwiftUI View の `@State` / `@Binding` プロパティに紐づくロジックは、`@Observable` class に移動することで型分割可能とする。
+- `extension` によるファイル分割ではメソッド数は減らない（全 extension 合算ルール）。`@Observable` class への移動を推奨する。
+- 子 View（`DedupTopBar`, `DedupFooter` 等）への分離は、値とクロージャを引数として渡す形式で行い、`@Binding` の多用を避ける。
+
+```swift
+// 推奨パターン
+@Observable @MainActor
+final class DedupModel {
+    var cur: Int
+    var selected: [Int: Set<String>]
+    // state + ロジック（4-5メソッド）
+}
+
+struct DedupView: View {
+    @State private var model: DedupModel
+    // 純粋なUI組立のみ（4-5メソッド）
+}
+```
 
 ## 9. 簡潔な命名（2単語ルール）
 
