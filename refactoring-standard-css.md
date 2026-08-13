@@ -16,7 +16,7 @@
 - 代替の全コードを提示し、コードのフローや設計意図を簡単に説明し、
 - 曖昧な点がある場合は確認しつつ、基本的には意図を汲み取り進めてください。
 - 全ての指示に合致しているか確認し、合致していない部分が見つかったら最初からやり直してください。
-- コード実行結果（視覚的な見た目・レイアウト・アニメーション）が変更されてしまう場合、リファクタリング失敗であるため、やり直してください。
+- コード実行結果（視覚的な見た目・レイアウト・アニメーション）が1mmでも変更されてしまう場合、リファクタリング失敗であるため、やり直してください。
 
 ## 3. モノ指向コンポーネント設計
 
@@ -266,3 +266,103 @@ CSS Custom Properties は「インターフェース」です。コンポーネ�
 ```
 
 - `@layer`, `@scope`, `@container` を使用しない既存コードは、リファクタリング時に段階的に導入する。一度に全体を書き直さず、コンポーネント単位で移行する。
+
+## 12. Jekyll / Liquid 例外規定
+
+Jekyll は Liquid テンプレートエンジンを通じてビルド時に CSS を処理できる。§3「すべてのスタイルはコンポーネントに帰属させる」の原則は維持しつつ、以下を例外として定める。**例外はここに列挙したものに限る。**
+
+### 12.1 Liquid 変数 vs CSS Custom Properties の使い分け
+
+ビルド時（Jekyll がサイトを生成する瞬間）に決まる値と、ランタイム（ブラウザ上）で変わりうる値を明確に分離してください。
+
+| 性質 | 手段 | 例 |
+|---|---|---|
+| ビルド時に確定する設定値 | Liquid 変数 `{{ site.data.theme.color }}` | ブランドカラー、フォントURL |
+| ランタイムで変化しうる値 | CSS Custom Properties `var(--x)` | テーマ切替、ユーザー設定 |
+
+```css
+/* OK: ビルド時確定値は Liquid で注入し、ランタイム変化は Custom Properties で管理 */
+:root {
+  --color-brand: {{ site.data.theme.brand_color }};  /* Liquid → ビルド時固定 */
+  --color-surface: var(--color-brand);               /* runtime で上書き可能 */
+}
+```
+
+Liquid 変数と CSS Custom Properties を混在させることは許容するが、「どちらがビルド時でどちらがランタイムか」の境界を曖昧にしてはいけません。
+
+### 12.2 フロントマター必須
+
+Liquid タグ（`{{ }}`, `{% %}`）を含む CSS ファイルには、必ずファイル先頭に空のフロントマターを付けてください。フロントマターがないと Liquid タグが文字通り出力されます。
+
+```css
+---
+---
+/* このファイルは Jekyll が Liquid として処理する */
+:root {
+  --color-brand: {{ site.data.theme.brand_color | default: "#005fcc" }};
+}
+```
+
+### 12.3 `_includes` とコンポーネントの 1 対 1 対応
+
+Jekyll の `_includes/` ディレクトリのファイル名と、CSS コンポーネント名を一致させてください。これがモノ指向における「型名とファイル名の一致」に相当します。
+
+```
+_includes/card.html        ↔  @scope (.card) { }
+_includes/user-card.html   ↔  @scope (.user-card) { }
+_includes/nav-item.html    ↔  @scope (.nav-item) { }
+```
+
+Liquid include の名前（kebab-case）= CSS コンポーネント名（kebab-case）。これが崩れると責務の追跡が困難になります。
+
+### 12.4 Liquid 条件分岐とスタイルの関係
+
+Liquid の `{% if %}` によってクラス名が変化する場合、CSS 側では `data-*` 属性で対応してください。JS と同様に、クラス名文字列への依存を最小化します。
+
+```liquid
+{%- comment -%} NG: Liquid がクラス名を動的に変えている {%- endcomment -%}
+<div class="badge {% if post.featured %}badge-featured{% endif %}">
+
+{%- comment -%} OK: 状態は data-* 属性で渡し、CSS は data-* で分岐する {%- endcomment -%}
+<div class="badge" {% if post.featured %}data-featured="true"{% endif %}>
+```
+
+```css
+@scope (.badge) {
+  :scope[data-featured="true"] {
+    --badge-bg: gold;
+  }
+}
+```
+
+### 12.5 `url()` 内のパス
+
+CSS の `url()` でサイト内アセットを参照する場合は `relative_url` フィルターを使用してください。パスをハードコードすると `baseurl` が異なる環境で壊れます。
+
+```css
+/* NG: パスをハードコード */
+background-image: url('/assets/images/hero.webp');
+
+/* OK: Liquid フィルターで環境非依存にする */
+background-image: url('{{ "/assets/images/hero.webp" | relative_url }}');
+```
+
+ただしリファクタリングで `url()` のパスを変更することは §10（差分チェック）違反です。パスは既存のまま維持し、`relative_url` への移行は別 PR で行ってください。
+
+### 12.6 Jekyll Sass パイプラインとの共存
+
+Jekyll は Sass/SCSS をネイティブサポートします。Sass を併用する場合の境界を明確にしてください。
+
+| 手段 | 解決タイミング | 用途 |
+|---|---|---|
+| Sass 変数（`$var`） | ビルド時（Sass コンパイル） | 中間計算・ループ生成 |
+| Liquid 変数（`{{ }}`） | ビルド時（Jekyll 処理） | サイト設定値の注入 |
+| CSS Custom Properties（`var(--x)`） | ランタイム（ブラウザ） | テーマ・状態変化 |
+
+Sass 変数と CSS Custom Properties は目的が異なります。**ランタイムで変化しうる値を Sass 変数で管理してはいけません**（ビルド時に値が固定されるため）。
+
+### 12.7 例外を使ってはいけないケース
+
+- Liquid でコンポーネントのコアスタイル（色・サイズ等）をすべてビルド時注入し、CSS Custom Properties を使わないこと。テーマ切替やアクセシビリティ（ハイコントラスト）対応が不可能になる。
+- `_includes` 名と CSS コンポーネント名を乖離させること。「どの HTML がどの CSS に対応するか」の追跡が困難になる。
+- Liquid `{% for %}` ループで大量のユーティリティクラスを生成すること。§3 のグローバルユーティリティ禁止原則は Liquid 生成クラスにも適用される。
