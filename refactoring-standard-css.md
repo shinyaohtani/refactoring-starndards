@@ -1,0 +1,268 @@
+# リファクタリング規準書 (CSS)
+
+モダン標準 CSS（`@scope`, `@layer`, `@container`, CSS Custom Properties）を前提とする。
+
+## 1. 基本方針
+
+- CSS をスマートかつ読みやすい形にリファクタリングすることを目的とする。
+- コンポーネント単位でスタイルが自己完結しており、配置場所に依存しない設計にする。
+- コード全体の構造を見ただけで、コンポーネントの責務と依存関係が把握できるように整理する。
+
+## 2. リファクタリング手順
+
+- コード全体の構成を理解したうえで、
+- 必要に応じてコンポーネント分割、責務の明確化を行い、
+- 処理の簡素化（Custom Properties による抽象化、`@scope` によるカプセル化）や統合を実施してスマートな構成に変換し、
+- 代替の全コードを提示し、コードのフローや設計意図を簡単に説明し、
+- 曖昧な点がある場合は確認しつつ、基本的には意図を汲み取り進めてください。
+- 全ての指示に合致しているか確認し、合致していない部分が見つかったら最初からやり直してください。
+- コード実行結果（視覚的な見た目・レイアウト・アニメーション）が変更されてしまう場合、リファクタリング失敗であるため、やり直してください。
+
+## 3. モノ指向コンポーネント設計
+
+CSS における「モノ」は**コンポーネント**です。コンポーネントとは「DOM 上に存在する、ひとつの意味ある実体」であり、kebab-case のクラス名で識別されます。
+
+### クラス名は名詞にする
+
+- コンポーネント名は必ず**名詞**にしてください。
+  - OK: `.card`, `.badge`, `.avatar`, `.nav`, `.dialog`, `.user-card`
+  - NG: `.highlight`, `.format`, `.animate`, `.process`（動詞）
+- 動詞・動詞にもなり得る語で終わる名前は禁止です。
+  - NG: `.formatter`, `.handler`, `.processor`, `.wrapper`, `.container`（機能を示唆する語）
+- 抽象的で意味をなさない語は禁止です。
+  - NG: `.common`, `.misc`, `.util`, `.helper`, `.manager`
+- 名前は **2 単語以内**にしてください。3 単語以上は責務過多の兆候です。
+  - NG: `.top-navigation-bar-item-container` → OK: `.nav-item`
+
+### コンポーネントは「自分の見た目は自分が定義する」
+
+スタイルはコンポーネントに**帰属させる**ことが原則です。コンポーネントの外から直接子要素を操作することは、オブジェクトの内部状態を外部から書き換えることと同義であり禁止です。
+
+```css
+/* NG: .page が .card の内部実装（span）を直接操作している */
+.page .card span { color: red; }
+
+/* OK: カスタムプロパティ経由で .card にだけ設定を注入する */
+.page .card { --card-text: red; }
+```
+
+### グローバルユーティリティクラスは static メソッド相当——原則禁止
+
+`.mt-4`, `.flex`, `.text-red` のようなグローバルユーティリティクラスは、オブジェクト指向でいう `static func` に相当します。
+
+- **どのコンポーネントにも帰属しない**。HTML 側に散在し、管理境界が崩れる。
+- **スタイルの責務が HTML に漏れ出す**。HTML が「どう見せるか」を知りすぎている。
+- **コンポーネントの自己完結性（カプセル化）を破壊する**。
+
+原則禁止。ただし以下は `@layer base` 内に限り例外として許容する（`static let` 相当）:
+
+- ブラウザリセット・ノーマライズ
+- `:root` に定義するデザイントークン（`--color-brand`, `--spacing-base` 等）
+- グリッドやフレックスレイアウトの**親コンテナへの指定**（子の細部ではなく、構造の骨格のみ）
+
+例外を使ってよいかの判断: 「このクラスはどのコンポーネントに帰属するか？」と問いかけ、答えられない場合は設計を見直す。
+
+## 4. コンポーネント構造制約
+
+### 状態バリアント数（メソッド数に相当）——4〜5 個
+
+1 つのコンポーネントが持つ**状態バリアント**（`@scope` 内のルールブロック数）は **4〜5 個を目安**にしてください。3 個未満は抽象化不足、6 個以上は責務過多の兆候です。
+
+**状態バリアントのカウント対象:**
+- `:scope`（デフォルト状態）
+- `:scope:hover`, `:scope:focus-visible`, `:scope:active`（インタラクション状態）
+- `:scope[data-variant="x"]`（スキンバリアント）
+- `:scope[data-size="sm"]`（サイズバリアント）
+
+```css
+/* OK: 5 状態のバリアント（ちょうど良い複雑さ） */
+@scope (.btn) {
+  :scope             { /* 1. デフォルト */ }
+  :scope:hover       { /* 2. ホバー    */ }
+  :scope:focus-visible { /* 3. フォーカス */ }
+  :scope[data-variant="primary"] { /* 4. プライマリ */ }
+  :scope:disabled    { /* 5. 無効     */ }
+}
+```
+
+**カウント対象外:**
+- `@keyframes` 定義
+- `:scope > .child` の単純な子要素配置指定（子コンポーネントの本体スタイルは子コンポーネント自身が持つ）
+- `@container` ブロック（レイアウト文脈への適応であり、責務の増加ではない）
+
+### ルールブロックの行数制限（25 行以下）
+
+1 つのルールブロック（`{}` 内のプロパティ群）は **25 行以下**にしてください。超える場合は CSS Custom Properties でデフォルト値を集約するか、子コンポーネントへの責務移譲を検討してください。
+
+### 公開カスタムプロパティ（公開インターフェース）
+
+コンポーネントが外部に公開する CSS Custom Properties は `--component-property` の形式で定義し、コンポーネントのブロック先頭に列挙してください。これがコンポーネントの「公開インターフェース」です。
+
+```css
+@scope (.card) {
+  :scope {
+    /* 公開インターフェース（外部から上書き可能） */
+    --card-bg: white;
+    --card-radius: 8px;
+    --card-padding: 1rem;
+    --card-shadow: 0 2px 4px rgb(0 0 0 / 0.1);
+
+    /* 内部実装（外部から上書きしない） */
+    --_gap: calc(var(--card-padding) / 2);
+
+    background: var(--card-bg);
+    border-radius: var(--card-radius);
+    padding: var(--card-padding);
+    box-shadow: var(--card-shadow);
+    gap: var(--_gap);
+  }
+}
+```
+
+### プライベートカスタムプロパティ
+
+コンポーネント内部でのみ使うカスタムプロパティは `--_` プレフィックスで明示し、外部からの上書き対象でないことを示してください。
+
+```css
+/* Python の _ 接頭辞、Swift の private に相当 */
+--_internal-gap: calc(var(--card-padding) / 2);
+```
+
+## 5. 命名規約
+
+- コンポーネント名は **kebab-case**。クラス名の中に動詞を混ぜない。
+- カスタムプロパティは `--component-property` の形式（コンポーネント名プレフィックス必須）。
+  - OK: `--card-bg`, `--nav-height`, `--badge-color`
+  - NG: `--color`, `--size`（スコープなし・抽象的すぎる）
+- 状態は HTML の `data-*` 属性または擬似クラスで表現し、JS によるクラス付け外しを最小化する。
+  - OK: `[data-state="open"]`, `:checked`, `:disabled`
+  - NG: `.is-open`, `.active`, `.selected`（JS がクラス名文字列に依存しすぎる）
+- デザイントークン（`:root` レベルの共有定数）は `--` のみのプレフィックスなしか、`--color-*`, `--spacing-*` のカテゴリプレフィックスを付ける（コンポーネント名は付けない）。
+  - OK: `--color-brand`, `--spacing-base`, `--font-body`
+  - NG: `--card-brand-color`（コンポーネントがグローバルトークン名を持つのは逆転）
+
+## 6. カプセル化（@scope / Shadow DOM）
+
+`@scope` を使い、スタイルをコンポーネント内部に閉じ込めてください。外部へのスタイル漏れや意図しない干渉を防ぎます。
+
+```css
+@scope (.card) {
+  /* .card 内部にだけ適用される */
+  :scope {
+    background: var(--card-bg, white);
+    border-radius: var(--card-radius, 8px);
+  }
+  /* .card 内の .title にだけ適用（外の .title には影響しない） */
+  .title {
+    font-size: 1.25rem;
+  }
+}
+```
+
+Web Components を使う場合は Shadow DOM によるカプセル化を優先してください。Shadow DOM 内のスタイルは外部から完全に隔離されます。`@scope` で十分な場合は Shadow DOM を強制しません。
+
+## 7. 抽象化と多態性（CSS Custom Properties）
+
+CSS Custom Properties は「インターフェース」です。コンポーネントの内部実装を隠蔽し、外部から設定値だけを注入できるようにしてください。
+
+```css
+/* コンポーネント定義（構造と公開インターフェース） */
+@scope (.badge) {
+  :scope {
+    --badge-color: navy;
+    --badge-bg: #e8f0fe;
+    --badge-radius: 999px;
+    --badge-size: 0.75rem;
+
+    color: var(--badge-color);
+    background: var(--badge-bg);
+    border-radius: var(--badge-radius);
+    font-size: var(--badge-size);
+  }
+
+  /* 多態性: 構造（セレクタ・プロパティ名）を変えず、値だけを差し替える */
+  :scope[data-variant="danger"] {
+    --badge-color: crimson;
+    --badge-bg: #fce8e8;
+  }
+
+  :scope[data-variant="success"] {
+    --badge-color: #1a5c2a;
+    --badge-bg: #e8f5e9;
+  }
+}
+```
+
+「構造（HTML）」と「見た目（Skin）」の分離がこれで完結します。バリアントを追加するとき、セレクタ構造を壊さずに値の差し替えだけで済むことが良い設計の証拠です。
+
+## 8. 文脈からの独立（@container）
+
+コンポーネントは**自身が置かれたコンテナのサイズに自己適応**してください。`@media`（ビューポートサイズへの依存）は、コンポーネントをページ構造に結合させるため、コンポーネントレベルでは原則禁止です。
+
+```css
+/* コンポーネントの親をコンテナとして登録 */
+.card-wrapper {
+  container-type: inline-size;
+  container-name: card;
+}
+
+@scope (.card) {
+  :scope {
+    display: flex;
+    flex-direction: row;
+  }
+}
+
+/* 配置場所ではなく、自分が置かれたコンテナサイズで自己変容 */
+@container card (width < 400px) {
+  @scope (.card) {
+    :scope { flex-direction: column; }
+  }
+}
+```
+
+`@media` を使ってよいのは、ページ全体のレイアウト骨格（グリッドのカラム数等）を制御する**レイアウト層**に限ります。
+
+## 9. 優先度の階層管理（@layer）
+
+`@layer` でスタイルの責務階層を明示的に定義し、詳細度（Specificity）の衝突を排除してください。
+
+```css
+/* ファイル先頭でレイヤー順を宣言する（後が勝つ） */
+@layer base, component, override;
+```
+
+| レイヤー | 役割 | 相当概念 |
+|---|---|---|
+| `base` | ブラウザリセット・HTML 要素のデフォルト整形・デザイントークン | フレームワーク基盤（Apple SDK 相当）|
+| `component` | モノ指向コンポーネントのスタイル群 | インスタンスメソッド群 |
+| `override` | テーマ・ページ固有の上書き（最小限） | Apple プロトコル準拠例外に相当 |
+
+### 詳細度は上げない
+
+- ID セレクタ（`#id`）は詳細度が爆発するため**禁止**。`data-*` 属性や `:scope` で代替する。
+- `!important` はレイヤー構造の外に出るため**原則禁止**。`@layer` で解決できます。
+- セレクタのネストを深くするほど詳細度が増す。ネストは `@scope` 内で最大 2 段まで。
+
+## 10. 差分チェック対応
+
+- リファクタリング前後で**視覚的な見た目が完全に一致する**ようにしてください。
+- レイアウト・カラー・タイポグラフィ・アニメーション・レスポンシブ挙動をすべて確認してください。
+- ビジュアルリグレッションテスト（Playwright, Chromatic 等）による確認を推奨します。
+- リファクタリング中に発見した見た目の問題（デザインバグ）は**別 issue として起票**し、本リファクタリングでは変更しないでください。
+
+## 11. Lint 対応
+
+- **Stylelint** のデフォルトルールに適合してください。
+- プロパティの記述順は以下の論理順序を推奨します:
+
+```
+1. CSS Custom Properties（--xxx）  ← 公開 → プライベートの順
+2. レイアウト（display, position, grid, flex, gap）
+3. ボックスモデル（width, height, padding, margin, border）
+4. 視覚（color, background, box-shadow, opacity）
+5. タイポグラフィ（font-*, line-height, text-*）
+6. トランジション・アニメーション（transition, animation）
+```
+
+- `@layer`, `@scope`, `@container` を使用しない既存コードは、リファクタリング時に段階的に導入する。一度に全体を書き直さず、コンポーネント単位で移行する。
